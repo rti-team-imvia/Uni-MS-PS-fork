@@ -1,6 +1,9 @@
 # dvd
 weights/model_calibrated.pth
 weights/model_uncalibrated.pth
+data/
+inference/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

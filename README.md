@@ -41,6 +41,25 @@ The code has been run with the following version:
 - numpy==1.22.4
 - timm=0.6.7
 
+dvd(2024/11/06): For cluster
+```shell
+qlogin -q gpu # Activate GPU
+module load cuda/12.4.1
+module load pytorch/1.11.0/cuda/11.3.1/gpu #pytorch/1.12.1/gpu
+module load opencv/4.5.4/gcc/11.2.0/module-x5zx4hp
+
+module load python/3.11/anaconda # Check which version with module avail python
+python -m venv .venv # Ignore if you already have a virtual environment
+source .venv/bin/activate # Activate virtual environment
+
+# Install packages
+/work/imvia/de1450bo/repos/Uni-MS-PS-fork/.venv/bin/python -m pip install --upgrade pip
+/work/imvia/de1450bo/repos/Uni-MS-PS-fork/.venv/bin/python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/
+/work/imvia/de1450bo/repos/Uni-MS-PS-fork/.venv/bin/python -m pip install opencv-python-headless pillow scipy numpy timm
+
+# Running the Test:
+/work/imvia/de1450bo/repos/Uni-MS-PS-fork/.venv/bin/python inference_file.py --path_obj /work/imvia/de1450bo/repos/Uni-MS-PS-fork/data/bearPNG --nb_img 6 --cuda
+```
 
 ## Pretrained Models
 Weights of the network are available at: https://drive.google.com/file/d/1scrTLjQCz0yJPecBMaaCqto2gDFrcCkE/view?usp=sharing for the Universal version and https://drive.google.com/file/d/1rM1Z0gVtDZvy6g0X9Jhc9rrHmd4tsP9F/view?usp=sharing for the calibrated version.

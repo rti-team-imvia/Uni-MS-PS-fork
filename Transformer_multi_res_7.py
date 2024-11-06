@@ -374,6 +374,7 @@ class Transformer_multi_res_7(nn.Module):
                      file):
 
         checkpoint = torch.load(file, 
-                                map_location=torch.device('cpu'))
+                                map_location=torch.device('cpu'),
+                                weights_only=True)
       
         self.load_state_dict(checkpoint) 
