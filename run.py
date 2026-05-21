@@ -7,10 +7,11 @@ from utils import depadding, normal_to_rgb
 from utils import load_imgs_mask, process_normal
 
 
-def run(model, path_obj, nb_img, folder_save, obj_name, calibrated):
+def run(model, path_obj, nb_img, folder_save, obj_name, calibrated, max_size=None):
     imgs, mask, padding, zoom_coord, original_shape = load_imgs_mask(path=path_obj,
                                                                      nb_img=nb_img,
-                                                                     calibrated=calibrated)
+                                                                     calibrated=calibrated,
+                                                                     max_size=max_size)
         
     normal = process_normal(model=model,
                             imgs=imgs,

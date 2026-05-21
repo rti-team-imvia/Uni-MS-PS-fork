@@ -12,19 +12,25 @@ parser.add_argument("--path_obj", type=str,
                     required=True, help= 'path_to_imgs')
 parser.add_argument('--cuda', action='store_true')
 parser.add_argument('--calibrated', action='store_true')
+parser.add_argument('--batch_encoder', type=int, default=3, help='batch size for encoder (default 3, recommended 9 for TENDUR)')
+parser.add_argument('--batch_transformer', type=int, default=5000, help='batch size for transformer (default 5000, recommended 10000-20000)')
 args = parser.parse_args()
         
 
 mode_inference = True
 
-obj_name = args.path_obj.split(os.sep)[-1]
+# Normalize path and extract object name
+normalized_path = os.path.normpath(args.path_obj)
+obj_name = os.path.basename(normalized_path)
 if len(obj_name)==0:
-    obj_name = args.path_obj.split(os.sep)[-2]
+    obj_name = os.path.basename(os.path.dirname(normalized_path))
     
 model = load_model(path_weight="weights",
                    cuda=args.cuda,
                    mode_inference=mode_inference,
-                   calibrated=args.calibrated)
+                   calibrated=args.calibrated,
+                   batch_size_encoder=args.batch_encoder,
+                   batch_size_transformer=args.batch_transformer)
 
 run(model=model,
     path_obj=args.path_obj,

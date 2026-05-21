@@ -1,9 +1,29 @@
 import numpy as np
-from PIL import Image
+from PIL import Image, ExifTags
 import os
 import torch
 import cv2
 from Transformer_multi_res_7 import Transformer_multi_res_7
+
+
+def apply_exif_orientation(img_path, img):
+    """Apply EXIF orientation to image loaded by OpenCV."""
+    try:
+        pil_img = Image.open(img_path)
+        exif = pil_img._getexif()
+        if exif is not None:
+            for tag, value in exif.items():
+                if ExifTags.TAGS.get(tag) == 'Orientation':
+                    if value == 3:
+                        img = cv2.rotate(img, cv2.ROTATE_180)
+                    elif value == 6:
+                        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+                    elif value == 8:
+                        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                    break
+    except Exception:
+        pass
+    return img
 
 
 
@@ -106,9 +126,11 @@ def load_imgs_mask(path,
     file_mask = os.path.join(path, "mask.png")
     if os.path.exists(file_mask):
         mask = cv2.imread(file_mask)
+        mask = apply_exif_orientation(file_mask, mask)
     else:
         file_img_example = os.path.join(path, temp[0])
         img_example = cv2.imread(file_img_example)
+        img_example = apply_exif_orientation(file_img_example, img_example)
         mask = np.ones(img_example.shape, 
                        dtype=np.uint8)
     
@@ -150,6 +172,7 @@ def load_imgs_mask(path,
         file1 = os.path.join(path, file)
         img = cv2.imread(file1, 
                          cv2.IMREAD_UNCHANGED)
+        img = apply_exif_orientation(file1, img)
         if len(img.shape)==2:
             img = np.expand_dims(img, -1)
             img = np.concatenate((img, img, img),
@@ -210,16 +233,21 @@ def load_imgs_mask(path,
 
 
 def load_model(path_weight, cuda,
-               calibrated, mode_inference=False): 
+               calibrated, mode_inference=False,
+               batch_size_encoder=3, batch_size_transformer=5000): 
     if calibrated:
         file_weight = os.path.join(path_weight, "model_calibrated.pth")
     else:
         file_weight = os.path.join(path_weight, "model_uncalibrated.pth")
     
     if calibrated:
-        model = Transformer_multi_res_7(c_in=6)
+        model = Transformer_multi_res_7(c_in=6,
+                                        batch_size_encoder=batch_size_encoder,
+                                        batch_size_transformer=batch_size_transformer)
     else:
-        model = Transformer_multi_res_7(c_in=3)
+        model = Transformer_multi_res_7(c_in=3,
+                                        batch_size_encoder=batch_size_encoder,
+                                        batch_size_transformer=batch_size_transformer)
         
     model.load_weights(file=file_weight)
     model.eval()

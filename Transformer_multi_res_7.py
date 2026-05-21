@@ -1,6 +1,8 @@
 import torch.nn as nn
 import torch
 import numpy as np
+import time
+from tqdm import tqdm
 from Transformer_8 import Transformer_8
 from utils_process import decrease_size_batch
 
@@ -279,19 +281,27 @@ class Transformer_multi_res_7(nn.Module):
     
     def process(self, x, nb_stage):
         normal = None
+        total_start_time = time.time()
         
+        print("\n" + "="*60)
+        print(f"Starting inference with {nb_stage} stages")
+        print("="*60)
+
         for i in range(nb_stage):
+            stage_start_time = time.time()
             inputs, masks = self.prepareInputs(x,
                                                nb_stage=nb_stage,
                                                stage_number=i)
 
             temps_imgs = []
             if i<self.initial_stage_number:
+                print(f"\nStage {i+1}/{nb_stage} - Resolution: {inputs[0].shape[-1]}x{inputs[0].shape[-1]} (full image)")
                 normal = self.forward_stage(imgs=inputs,
                                             mask=masks,
                                             index_scale=i,
                                             normal=normal)
                 normal = normal.cpu()
+                print(f"  Stage {i+1} completed in {time.time() - stage_start_time:.1f}s")
 
             else:
                 size_stage_x, size_stage_y, decrease_step = self.find_size_stage(num_stage=i,
@@ -320,8 +330,11 @@ class Transformer_multi_res_7(nn.Module):
                                             self.patch_size,
                                             self.patch_size,
                                             coords_x.shape[-1])
-                
-                for j in range(coords_x.shape[-1]):
+
+                num_patches = coords_x.shape[-1]
+                print(f"\nStage {i+1}/{nb_stage} - Resolution: {size_stage_x}x{size_stage_y} ({num_patches} patches)")
+
+                for j in tqdm(range(num_patches), desc="  Processing patches", unit="patch"):
                     temps_imgs = []
                     for k in range(len(inputs)):
                         with torch.no_grad():
@@ -363,10 +376,12 @@ class Transformer_multi_res_7(nn.Module):
                                          coords_x = coords_x,
                                          coords_y=coords_y,
                                          size_img=self.size_img_pad)   
-        
-        masks = masks.cpu()
-        normal = torch.nn.functional.normalize(normal, 2, 1) 
-        normal = normal.masked_fill(masks, 0) 
+                print(f"  Stage {i+1} completed in {time.time() - stage_start_time:.1f}s")
+
+        total_time = time.time() - total_start_time
+        print("\n" + "="*60)
+        print(f"TOTAL INFERENCE TIME: {total_time:.1f}s ({total_time/60:.1f} minutes)")
+        print("="*60 + "\n")
         return {"n": normal}
 
 
