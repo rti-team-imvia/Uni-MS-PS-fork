@@ -1,3 +1,4 @@
+import sys
 import torch.nn as nn
 import torch
 import numpy as np
@@ -125,18 +126,17 @@ class Transformer_multi_res_7(nn.Module):
 
 
     def build_fold(self, img, size_img, coords_x, coords_y):
-        
-        result = torch.zeros(img.shape[0],
-                             img.shape[1],
-                             size_img[0],
-                             size_img[1])
-        
-        for i in range(img.shape[-1]):
-            result[:,:,
-                   coords_x[:,:,i],
-                   coords_y[:,:,i]] += img[:,:,:,:,i]
-
-        return result    
+        B, C, P, _, N = img.shape
+        H, W = size_img
+        # Flatten patches and spatial dims into one dimension: (B, C, N*P*P)
+        img_flat = img.permute(0, 1, 4, 2, 3).reshape(B, C, -1)
+        # Linear indices into the H×W output grid: row*W + col, shape (N*P*P,)
+        flat_idx = (coords_x.permute(2, 0, 1).reshape(-1) * W +
+                    coords_y.permute(2, 0, 1).reshape(-1)).long()
+        flat_idx = flat_idx.unsqueeze(0).unsqueeze(0).expand(B, C, -1)
+        result = torch.zeros(B, C, H * W, dtype=img.dtype, device=img.device)
+        result.scatter_add_(2, flat_idx, img_flat)
+        return result.reshape(B, C, H, W)
     
 
     def find_size_stage(self, num_stage,
@@ -334,44 +334,74 @@ class Transformer_multi_res_7(nn.Module):
                 num_patches = coords_x.shape[-1]
                 print(f"\nStage {i+1}/{nb_stage} - Resolution: {size_stage_x}x{size_stage_y} ({num_patches} patches)")
 
-                for j in tqdm(range(num_patches), desc="  Processing patches", unit="patch"):
-                    temps_imgs = []
-                    for k in range(len(inputs)):
+                mask_weight = self.gen_weight_normal_mask()  # precompute once – same for every patch
+
+                # ── Adaptive batch sizes for patch stages ──────────────────────
+                # Patches are self.patch_size × self.patch_size (e.g. 256×256).
+                # Images at this resolution are tiny compared to full-res stages,
+                # so we can safely process all N images in a single encoder pass
+                # and cover all spatial positions of the deepest attention layer
+                # (patch_size² = 65 536 for patch_size=256) in one GPU call,
+                # eliminating repeated CPU↔GPU round-trips and the O(N²) cost of
+                # the growing torch.cat that was the main per-patch bottleneck.
+                n_imgs = len(inputs)
+                _spatial = self.patch_size * self.patch_size  # deepest stage positions
+                orig_bse = self.Net_stage.batch_size_encoder
+                orig_bsts = {}
+                self.Net_stage.batch_size_encoder = n_imgs
+                for _si in range(self.Net_stage.num_stages):
+                    _pb = getattr(self.Net_stage, f"pool_block{_si + 1}")
+                    orig_bsts[f"p{_si}"] = _pb.eval_mode_batch_size
+                    _pb.eval_mode_batch_size = _spatial + 1
+                    if _si < self.Net_stage.num_stages - 1:
+                        _lb = getattr(self.Net_stage, f"light_block{_si + 1}")
+                        orig_bsts[f"l{_si}"] = _lb.eval_mode_batch_size
+                        _lb.eval_mode_batch_size = _spatial + 1
+                # ───────────────────────────────────────────────────────────────
+
+                try:
+                    for j in tqdm(range(num_patches), desc="  Processing patches", unit="patch",
+                                  file=sys.stdout, dynamic_ncols=True, leave=True):
+                        temps_imgs = []
+                        for k in range(len(inputs)):
+                            with torch.no_grad():
+                                img = inputs[k]
+                                img = self.build_unfold_img(img=img,
+                                                            coord_x=coords_x[:, :, j],
+                                                            coord_y=coords_y[:, :, j])
+                                temps_imgs.append(img)
+
+                        normal1 = self.build_unfold_img(img=normal,
+                                                        coord_x=coords_x[:, :, j],
+                                                        coord_y=coords_y[:, :, j])
                         with torch.no_grad():
-                            img = inputs[k]
-                            img = self.build_unfold_img(img=img,
-                                                        coord_x=coords_x[:,:,j],
-                                                        coord_y=coords_y[:,:,j])
-            
-                            temps_imgs.append(img)
-                    
-                    normal1 = self.build_unfold_img(img=normal,
-                                                    coord_x=coords_x[:,:,j],
-                                                    coord_y=coords_y[:,:,j])
-                    with torch.no_grad():
-                        mask_patches = self.gen_mask_patch(coord_x=coords_x[:,:,j],
-                                                           coord_y=coords_y[:,:,j],
-                                                           shape_img=self.size_img_pad)
-                        
-                        mask_patches = mask_patches.to(masks.device)
-                        mask_patches = (mask_patches*self.build_unfold_img(img=masks,
-                                                                           coord_x=coords_x[:,:,j],
-                                                                           coord_y=coords_y[:,:,j]))>0
-                        
-                        normal1 = self.forward_stage(imgs=temps_imgs,
-                                                    mask=mask_patches,
-                                                    index_scale=i,
-                                                    normal=normal1)
-                        normal1 = normal1.cpu()
-                        
-                    mask_weight = self.gen_weight_normal_mask()
-                    mask_weight = mask_weight.to(normal1.device)
-                    normal_output = normal_output.to(normal1.device)
-             
-                    normal_output[:,:,
-                                  :,:,
-                                  j] += (normal1*mask_weight)
-             
+                            mask_patches = self.gen_mask_patch(coord_x=coords_x[:, :, j],
+                                                               coord_y=coords_y[:, :, j],
+                                                               shape_img=self.size_img_pad)
+
+                            mask_patches = mask_patches.to(masks.device)
+                            mask_patches = (mask_patches * self.build_unfold_img(
+                                img=masks,
+                                coord_x=coords_x[:, :, j],
+                                coord_y=coords_y[:, :, j])) > 0
+
+                            normal1 = self.forward_stage(imgs=temps_imgs,
+                                                         mask=mask_patches,
+                                                         index_scale=i,
+                                                         normal=normal1)
+                            normal1 = normal1.cpu()
+
+                        normal_output = normal_output.to(normal1.device)
+                        normal_output[:, :, :, :, j] += (normal1 * mask_weight)
+
+                finally:
+                    # Restore original batch sizes for full-res stages
+                    self.Net_stage.batch_size_encoder = orig_bse
+                    for _si in range(self.Net_stage.num_stages):
+                        getattr(self.Net_stage, f"pool_block{_si + 1}").eval_mode_batch_size = orig_bsts[f"p{_si}"]
+                        if _si < self.Net_stage.num_stages - 1:
+                            getattr(self.Net_stage, f"light_block{_si + 1}").eval_mode_batch_size = orig_bsts[f"l{_si}"]
+
                 normal = self.build_fold(normal_output,
                                          coords_x = coords_x,
                                          coords_y=coords_y,

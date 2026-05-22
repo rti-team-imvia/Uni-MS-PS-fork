@@ -3,6 +3,7 @@ from PIL import Image, ExifTags
 import os
 import torch
 import cv2
+from concurrent.futures import ThreadPoolExecutor
 from Transformer_multi_res_7 import Transformer_multi_res_7
 
 
@@ -26,6 +27,10 @@ def apply_exif_orientation(img_path, img):
     return img
 
 
+def _decode_single_image(file1):
+    """Load one image file and apply EXIF orientation. Used for parallel loading."""
+    img = cv2.imread(file1, cv2.IMREAD_UNCHANGED)
+    return apply_exif_orientation(file1, img)
 
 
 def resize(img, expected_size):
@@ -168,11 +173,13 @@ def load_imgs_mask(path,
     else:
         files = np.random.choice(temp, nb_img, replace=False)
         
-    for file in files:
-        file1 = os.path.join(path, file)
-        img = cv2.imread(file1, 
-                         cv2.IMREAD_UNCHANGED)
-        img = apply_exif_orientation(file1, img)
+    file_paths = [os.path.join(path, f) for f in files]
+    n_workers = min(len(file_paths), (os.cpu_count() or 4))
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        decoded_imgs = list(executor.map(_decode_single_image, file_paths))
+
+    mask_flat = mask.flatten()
+    for img in decoded_imgs:
         if len(img.shape)==2:
             img = np.expand_dims(img, -1)
             img = np.concatenate((img, img, img),
@@ -193,7 +200,7 @@ def load_imgs_mask(path,
         img = img.astype(np.float32)
         mean_img = np.mean(img, -1)
         mean_img = mean_img.flatten()
-        mean_img1 = np.mean(mean_img[mask.flatten()])
+        mean_img1 = np.mean(mean_img[mask_flat])
         img = img/mean_img1
         
         imgs.append(img)

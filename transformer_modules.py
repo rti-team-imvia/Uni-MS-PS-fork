@@ -119,12 +119,12 @@ class TransformerLayer(nn.Module):
         if self.eval_mode:
             if self.use_cuda_eval_mode:
                 self.enc = self.enc.cuda()
-            x1 = torch.Tensor()
+            chunks = []
             index = 0
             batch_size = self.eval_mode_batch_size
             
-            while index<x.shape[0]:
-                x2 = x[index:(index+batch_size)]
+            while index < x.shape[0]:
+                x2 = x[index:(index + batch_size)]
                 if self.use_cuda_eval_mode:
                     x2 = x2.cuda()
                         
@@ -132,10 +132,9 @@ class TransformerLayer(nn.Module):
                 if self.use_cuda_eval_mode:
                     x2 = x2.cpu()
                         
-                x1 = torch.cat((x1, x2), 0)
-                    
-                index+=batch_size
-            x = x1
+                chunks.append(x2)
+                index += batch_size
+            x = chunks[0] if len(chunks) == 1 else torch.cat(chunks, 0)
             if self.use_cuda_eval_mode:
                 self.enc = self.enc.cpu()
         else:
@@ -181,12 +180,11 @@ class TransformerLayer_pooling(nn.Module):
             if self.use_cuda_eval_mode:
                 self.enc = self.enc.cuda()
                 self.dec = self.dec.cuda()
-            x1 = torch.Tensor()
+            chunks = []
             index = 0
             batch_size = self.eval_mode_batch_size
-            #pbar = tqdm(total=x.shape[0])
-            while index<x.shape[0]:
-                x2 = x[index:(index+batch_size)]
+            while index < x.shape[0]:
+                x2 = x[index:(index + batch_size)]
                 if self.use_cuda_eval_mode:
                     x2 = x2.cuda()
     
@@ -196,10 +194,9 @@ class TransformerLayer_pooling(nn.Module):
                 if self.use_cuda_eval_mode:
                     x2 = x2.cpu()
                         
-                x1 = torch.cat((x1, x2), 0)
-                index+=batch_size
-
-            x = x1
+                chunks.append(x2)
+                index += batch_size
+            x = chunks[0] if len(chunks) == 1 else torch.cat(chunks, 0)
             if self.use_cuda_eval_mode:
                 self.enc = self.enc.cpu()
                 self.dec = self.dec.cpu()

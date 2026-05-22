@@ -163,24 +163,19 @@ class Transformer_8(nn.Module):
         if self.eval_mode:
             if self.use_cuda_eval_mode:
                 patch_embed = patch_embed.cuda()
-            x1 = torch.Tensor()
-            
+            chunks = []
             index_batch = 0
             batch_size = self.batch_size_encoder
-            #pbar = tqdm(total=x.shape[0])
-            while index_batch<x.shape[0]:
-                x2 = x[index_batch:(index_batch+batch_size)]
+            while index_batch < x.shape[0]:
+                x2 = x[index_batch:(index_batch + batch_size)]
                 if self.use_cuda_eval_mode:
                     x2 = x2.cuda()
-                    
                 x2, H1, W1 = patch_embed(x2)
                 if self.use_cuda_eval_mode:
                     x2 = x2.cpu()
-                
-                x1 = torch.cat((x1, x2), 0)
-                index_batch+=batch_size
-                
-            x = x1
+                chunks.append(x2)
+                index_batch += batch_size
+            x = chunks[0] if len(chunks) == 1 else torch.cat(chunks, 0)
             if self.use_cuda_eval_mode:
                 patch_embed = patch_embed.cpu()
         else:
@@ -193,29 +188,24 @@ class Transformer_8(nn.Module):
             x = x.cpu()
             patch_embed = patch_embed.cpu()
         for blk in block:
-            if self.eval_mode:                    
+            if self.eval_mode:
                 if self.use_cuda_eval_mode:
                     blk = blk.cuda()
-                x1 = torch.Tensor()
-                
+                chunks = []
                 index_batch = 0
                 batch_size = self.batch_size_encoder
-                #pbar = tqdm(total=x.shape[0])
-                while index_batch<x.shape[0]:
-                    x2 = x[index_batch:(index_batch+batch_size)]
+                while index_batch < x.shape[0]:
+                    x2 = x[index_batch:(index_batch + batch_size)]
                     if self.use_cuda_eval_mode:
                         x2 = x2.cuda()
                     x2 = blk(x2, H1, W1)
                     if self.use_cuda_eval_mode:
                         x2 = x2.cpu()
-                        
-                    x1 = torch.cat((x1, x2), 0)
-                    index_batch+=batch_size
-                    
-                x = x1
+                    chunks.append(x2)
+                    index_batch += batch_size
+                x = chunks[0] if len(chunks) == 1 else torch.cat(chunks, 0)
                 if self.use_cuda_eval_mode:
                     blk = blk.cpu()
-                    
             else:
                 x = x.to(next(blk.parameters()).device)
                 x = blk(x, H1, W1)

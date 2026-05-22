@@ -38,7 +38,6 @@ from __future__ import print_function, division
 import argparse
 import shutil
 import sys
-import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -161,30 +160,27 @@ def run_batch(args: argparse.Namespace) -> None:
         print(f'[{index}/{len(case_dirs)}] {relative_dir}')
         print(f'            -> {out_relative}')
 
-        # Skip if already completed
-        if (final_output_dir / NORMAL_FILENAME).exists():
+        # Skip if already completed (use --force to reprocess)
+        if not args.force and (final_output_dir / NORMAL_FILENAME).exists():
             print('  ALREADY DONE – skipping\n')
             skipped += 1
             continue
 
         t0 = time.time()
-        staging_dir = Path(tempfile.mkdtemp(prefix='unips_stage_'))
 
         try:
-            # Stage images into temp dir
-            try:
-                stage_case(case_dir, staging_dir)
-            except FileNotFoundError as exc:
-                print(f'  SKIPPED (no images): {exc}\n')
+            if not find_rti_images(case_dir):
+                print('  SKIPPED (no images)\n')
                 skipped += 1
                 continue
 
-            # Run Uni-MS-PS — saves normal_uni.png (and normal_uni.mat) to
-            # final_output_dir directly.
+            # Run Uni-MS-PS directly on the source folder.
+            # load_imgs_mask already ignores non-image files (.lp, .txt, etc.)
+            # so no staging / file-copy step is needed.
             final_output_dir.mkdir(parents=True, exist_ok=True)
             unips_run(
                 model=model,
-                path_obj=str(staging_dir),
+                path_obj=str(case_dir),
                 nb_img=args.nb_img,
                 folder_save=str(final_output_dir),
                 obj_name='normal_uni',
@@ -202,10 +198,6 @@ def run_batch(args: argparse.Namespace) -> None:
             traceback.print_exc()
             skipped += 1
             continue
-
-        finally:
-            # Always clean up the staging dir
-            shutil.rmtree(staging_dir, ignore_errors=True)
 
         elapsed = time.time() - t0
         print(f'  Done  ->  {final_output_dir}  ({elapsed:.1f} s)\n')
@@ -245,6 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help='Downsample input images to this square size before inference. '
                         'Reduces stages and patches dramatically (2048 = ~18x faster than 8192). '
                         '-1 to disable (use native image size).')
+    p.add_argument('--force', action='store_true',
+                   help='Re-process cases even if normal_uni.png already exists.')
     return p
 
 
