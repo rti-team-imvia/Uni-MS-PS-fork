@@ -266,14 +266,17 @@ class Transformer_multi_res_7(nn.Module):
 
         temp = torch.stack(imgs).permute(1,0,2,3,4)
 
-        if index_scale==0:
-            stage_pred = self.Net_first.forward([temp,
-                                                 mask])
-        else:
-            stage_pred = self.Net_stage.forward([temp,
-                                                 mask])
+        _on_cuda = next(self.Net_first.parameters()).is_cuda if index_scale == 0 \
+                   else next(self.Net_stage.parameters()).is_cuda
+        with torch.amp.autocast('cuda', enabled=_on_cuda):
+            if index_scale==0:
+                stage_pred = self.Net_first.forward([temp,
+                                                     mask])
+            else:
+                stage_pred = self.Net_stage.forward([temp,
+                                                     mask])
             
-        normal = stage_pred["n"]
+        normal = stage_pred["n"].float()  # autocast may return fp16; ensure fp32 throughout
         normal = nn.functional.normalize(normal, 2, 1)
         return normal
     
@@ -359,6 +362,16 @@ class Transformer_multi_res_7(nn.Module):
                         _lb.eval_mode_batch_size = _spatial + 1
                 # ───────────────────────────────────────────────────────────────
 
+                # Keep Net_stage on GPU for the whole patch loop instead of
+                # moving each sub-layer (~27) to GPU and back per patch call.
+                # eval_mode=False uses .to(device) auto-routing so inputs are
+                # moved to CUDA inside forward_stage; last_device="cuda" (set
+                # by .cuda()) keeps the output on GPU until normal1.cpu() below.
+                _net_was_cuda_eval = getattr(self.Net_stage, 'use_cuda_eval_mode', False)
+                if _net_was_cuda_eval:
+                    self.Net_stage.change_eval_mode(eval_mode=False)
+                    self.Net_stage.cuda()  # also sets last_device="cuda"
+
                 try:
                     for j in tqdm(range(num_patches), desc="  Processing patches", unit="patch",
                                   file=sys.stdout, dynamic_ncols=True, leave=True):
@@ -395,6 +408,11 @@ class Transformer_multi_res_7(nn.Module):
                         normal_output[:, :, :, :, j] += (normal1 * mask_weight)
 
                 finally:
+                    # Restore GPU placement and eval mode for full-res stages
+                    if _net_was_cuda_eval:
+                        self.Net_stage.cpu()
+                        self.Net_stage.last_device = "cpu"
+                        self.Net_stage.change_eval_mode(eval_mode=True, use_cuda_eval_mode=True)
                     # Restore original batch sizes for full-res stages
                     self.Net_stage.batch_size_encoder = orig_bse
                     for _si in range(self.Net_stage.num_stages):
