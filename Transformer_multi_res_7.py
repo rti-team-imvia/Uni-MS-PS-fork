@@ -134,6 +134,7 @@ class Transformer_multi_res_7(nn.Module):
         flat_idx = (coords_x.permute(2, 0, 1).reshape(-1) * W +
                     coords_y.permute(2, 0, 1).reshape(-1)).long()
         flat_idx = flat_idx.unsqueeze(0).unsqueeze(0).expand(B, C, -1)
+        flat_idx = flat_idx.to(img.device)  # coords are always CPU; follow img device
         result = torch.zeros(B, C, H * W, dtype=img.dtype, device=img.device)
         result.scatter_add_(2, flat_idx, img_flat)
         return result.reshape(B, C, H, W)
@@ -369,8 +370,11 @@ class Transformer_multi_res_7(nn.Module):
                 # by .cuda()) keeps the output on GPU until normal1.cpu() below.
                 _net_was_cuda_eval = getattr(self.Net_stage, 'use_cuda_eval_mode', False)
                 if _net_was_cuda_eval:
+                    torch.backends.cudnn.benchmark = True  # fixed 256×256 shape repeats N times
                     self.Net_stage.change_eval_mode(eval_mode=False)
                     self.Net_stage.cuda()  # also sets last_device="cuda"
+                    normal_output = normal_output.cuda()  # keep accumulator on GPU
+                    mask_weight = mask_weight.cuda()      # weight tensor follows
 
                 try:
                     for j in tqdm(range(num_patches), desc="  Processing patches", unit="patch",
@@ -402,9 +406,7 @@ class Transformer_multi_res_7(nn.Module):
                                                          mask=mask_patches,
                                                          index_scale=i,
                                                          normal=normal1)
-                            normal1 = normal1.cpu()
 
-                        normal_output = normal_output.to(normal1.device)
                         normal_output[:, :, :, :, j] += (normal1 * mask_weight)
 
                 finally:
@@ -423,7 +425,9 @@ class Transformer_multi_res_7(nn.Module):
                 normal = self.build_fold(normal_output,
                                          coords_x = coords_x,
                                          coords_y=coords_y,
-                                         size_img=self.size_img_pad)   
+                                         size_img=self.size_img_pad)
+                if _net_was_cuda_eval:
+                    normal = normal.cpu()  # one transfer per stage instead of one per patch
                 print(f"  Stage {i+1} completed in {time.time() - stage_start_time:.1f}s")
 
         total_time = time.time() - total_start_time
