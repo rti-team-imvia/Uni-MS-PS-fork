@@ -150,6 +150,14 @@ def load_imgs_mask(path,
     x_min, x_max = np.min(coord[:,0]), np.max(coord[:,0])
     y_min, y_max = np.min(coord[:,1]), np.max(coord[:,1])
 
+    # Expand bounding box by one patch (256 px) on every side so that content
+    # near the mask boundary is never cut off during patch-based processing.
+    _margin = 256
+    x_min = max(0, x_min - _margin)
+    x_max = min(mask.shape[0], x_max + _margin)
+    y_min = max(0, y_min - _margin)
+    y_max = min(mask.shape[1], y_max + _margin)
+
     x_max_pad = mask.shape[0] - x_max
     y_max_pad = mask.shape[1] - y_max
         
